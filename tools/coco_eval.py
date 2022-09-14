@@ -25,10 +25,11 @@ class CocoEvaluator:
         self.img_ids = []
         self.eval_imgs = {k: [] for k in iou_types}
 
-    def wandb(self,summery):
-        wandb.log({'recall':summery[8],
-                   'ap_0.5:0.95':self.summery[0],
-                   'ap_0.5':self.summery[1]})
+    def wandb(self):
+        summary = self.coco_eval['bbox'].stats
+        wandb.log({'recall':summary[8],
+                   'ap_0.5:0.95':self.summary[0],
+                   'ap_0.5':self.summary[1]})
 
     def update(self, predictions):
         img_ids = list(np.unique(list(predictions.keys())))
@@ -58,9 +59,7 @@ class CocoEvaluator:
     def summarize(self):
         for iou_type, coco_eval in self.coco_eval.items():
             print(f"IoU metric: {iou_type}")
-            if iou_type == 'bbox':
-                summery = coco_eval.summarize()
-                self.wandb(summery)
+            coco_eval.summarize()
     def prepare(self, predictions, iou_type):
         if iou_type == "bbox":
             return self.prepare_for_coco_detection(predictions)
