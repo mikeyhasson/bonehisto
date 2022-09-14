@@ -28,8 +28,8 @@ class CocoEvaluator:
     def wandb(self):
         summary = self.coco_eval['bbox'].stats
         wandb.log({'recall':summary[8],
-                   'ap_0.5:0.95':self.summary[0],
-                   'ap_0.5':self.summary[1]})
+                   'ap_0.5:0.95':summary[0],
+                   'ap_0.5':summary[1]})
 
     def update(self, predictions):
         img_ids = list(np.unique(list(predictions.keys())))
