@@ -8,7 +8,6 @@ import torch
 import torch.distributed as dist
 import wandb
 
-
 class SmoothedValue:
     """Track a series of values and provide access to smoothed values over a
     window or the global series average.
@@ -119,7 +118,7 @@ class MetricLogger:
     def wandb(self,phase):
         d = {}
         for name in ["loss","classification","bbox_regression"]:
-            d[f"{phase}/{name}"] = self.meters[name].value()
+            d[f"{phase}/{name}"] = self.meters[name].value
         wandb.log(d)
 
     def update(self, **kwargs):
@@ -289,12 +288,13 @@ def init_distributed_mode(args):
     setup_for_distributed(args.rank == 0)
 
 
-def batch_mean_and_sd(loader):
+def batch_mean_and_sd(loader,device):
     cnt = 0
     fst_moment = torch.empty(3)
     snd_moment = torch.empty(3)
 
     for images, _ in loader:
+        images = torch.stack(images)
         b, c, h, w = images.shape
         nb_pixels = b * h * w
         sum_ = torch.sum(images, dim=[0, 2, 3])

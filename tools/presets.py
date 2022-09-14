@@ -56,8 +56,8 @@ class DetectionPresetTrain:
         elif data_augmentation == "bonecell":
             self.transforms = T.Compose(
                 [
-                    T.RandomPhotometricDistort(saturation = (-0.2,0.2),hue=(-0.05,0.05),
-                                               brightness=(-0.1,0.1), contrast=(0,0),p=0.5),
+                    T.RandomPhotometricDistort(saturation = (1-0.2,1+0.2),hue=(-0.05,0.05),
+                                               brightness=(1-0.1,1+0.1), contrast=(1,1),p=0.5),
                     T.RandomHorizontalFlip(p=hflip_prob),
                     T.RandomVerticalFlip(p=vflip_prob),
 

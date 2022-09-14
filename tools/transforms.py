@@ -35,7 +35,7 @@ class RandomVerticalFlip(T.RandomVerticalFlip):
             image = F.vflip(image)
             if target is not None:
                 _, height, width = F.get_dimensions(image)
-                target["boxes"][:, [1, 3]] = height - target["boxes"][:, [1, 3]]
+                target["boxes"][:, [1, 3]] = height - target["boxes"][:, [3, 1]]
         return image, target
 
 

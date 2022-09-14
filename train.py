@@ -106,7 +106,7 @@ def get_args_parser(add_help=True):
     parser.add_argument(
         "--max-lr", default=0.1, type=float, help="maximal lr (onecyclelr scheduler only)"
     )
-    parser.add_argument("--name", default="run", type=int, help="name run for wandb")
+    parser.add_argument("--name", default="run", type=str, help="name run for wandb")
     parser.add_argument("--print-freq", default=10, type=int, help="print frequency")
     parser.add_argument("--output-dir", default="out_weights", type=str, help="path to save outputs")
     parser.add_argument("--resume", default="", type=str, help="path of checkpoint")
@@ -155,7 +155,7 @@ def init_wandb(args):
 
     wandb.init(project=args.dataset, config=config_dic,name = args.name)
     wandb.define_metric("epoch")
-    for name in ["train/*","valid/*","recall",'precision', 'f1', 'mAP']:
+    for name in ["train/*","valid/*","recall",'ap_0.5:0.95', 'ap_0.5']:
         wandb.define_metric(name, step_metric="epoch")
 
 
@@ -212,7 +212,7 @@ def main(args):
         if args.rpn_score_thresh is not None:
             kwargs["rpn_score_thresh"] = args.rpn_score_thresh
 
-    mean, std = utils.batch_mean_and_sd(data_loader)
+    mean, std = utils.batch_mean_and_sd(data_loader,device=device)
     model = retinanet_resnet18_fpn_v2(weights=args.weights, weights_backbone=args.weights_backbone,
                                    num_classes=num_classes, image_mean=mean, image_std=std, **kwargs)
     model.to(device)
@@ -295,10 +295,7 @@ def main(args):
 
         # evaluate after every epoch
         valid_one_epoch(model, data_loader, device, scaler) #to get val loss
-        coco_evaluator = evaluate(model, data_loader_test, device=device)
-
-        coco_evaluator.wandb()
-
+        evaluate(model, data_loader_test, device=device)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
