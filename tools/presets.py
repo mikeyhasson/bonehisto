@@ -7,7 +7,6 @@ class DetectionPresetTrain:
         if data_augmentation == "bonecell":
             self.transforms = T.Compose([
                 T.FixedSizeCrop((crop_size,crop_size)),
-                T.Rotate(limit=180),
                 T.RandomHorizontalFlip(p=0.5),
                 T.RandomVerticalFlip(p=0.5),
                 T.RandomPhotometricDistort(saturation=(1 - 0.2, 1 + 0.2), hue=(-0.05, 0.05),
