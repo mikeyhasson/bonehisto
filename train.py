@@ -88,8 +88,16 @@ def get_args_parser(add_help=True):
         help="weight decay for Normalization layers (default: None, same value as --wd)",
     )
     parser.add_argument(
-        "--lr-scheduler", default="multisteplr", type=str, help="name of lr scheduler (default: multisteplr)"
+        "--lr-scheduler", default="reducelronplateau", type=str, help="name of lr scheduler (default: multisteplr)"
     )
+
+    parser.add_argument(
+        "--scheduler-factor", default=0.7, type=float, help="for reducelronplateau"
+    )
+    parser.add_argument(
+        "--scheduler-patience", default=6, type=int, help="for reducelronplateau"
+    )
+
     parser.add_argument(
         "--lr-step-size", default=8, type=int, help="decrease lr every step-size epochs (multisteplr scheduler only)"
     )
@@ -149,7 +157,7 @@ def get_args_parser(add_help=True):
 
 
 def init_wandb(args):
-    config_dic = {"data_augmentation":args.data_augmentation, "epochs": args.epochs, "lr":args.lr,
+    config_dic = {"data_augmentation":args.data_augmentation, "epochs": args.epochs, "lr0":args.lr,
                   "lr_gamma": args.lr_gamma, "lr_scheduler": args.lr_scheduler, "opt":args.opt,
                   "weight_decay":args.weight_decay, "batch_size":args.batch_size}
 
@@ -252,6 +260,10 @@ def main(args):
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_steps, gamma=args.lr_gamma)
     elif args.lr_scheduler == "cosineannealinglr":
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    elif args.lr_scheduler == "reducelronplateau":
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=args.scheduler_factor,
+                                                         patience=args.scheduler_patience)
+
     else:
         raise RuntimeError(
             f"Invalid lr scheduler '{args.lr_scheduler}'. Only MultiStepLR and CosineAnnealingLR are supported."
@@ -278,7 +290,6 @@ def main(args):
             train_sampler.set_epoch(epoch)
 
         train_one_epoch(model, optimizer, data_loader, device, epoch, args.print_freq, scaler)
-        lr_scheduler.step()
 
         if args.output_dir:
             checkpoint = {
@@ -294,7 +305,10 @@ def main(args):
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
 
         # evaluate after every epoch
-        valid_one_epoch(model, data_loader, device, scaler) #to get val loss
+        loss = valid_one_epoch(model, data_loader, device, scaler) #to get val loss
+        lr_scheduler.step(loss)
+        wandb.log({"lr": optimizer.param_groups[0]["lr"], "epoch": epoch})
+
         evaluate(model, data_loader_test, device=device)
 
     total_time = time.time() - start_time

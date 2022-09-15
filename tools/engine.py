@@ -59,7 +59,6 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, sc
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
     metric_logger.wandb("train")
-    wandb.log({"lr": optimizer.param_groups[0]["lr"],"epoch":epoch})
     return metric_logger
 
 
@@ -101,7 +100,7 @@ def valid_one_epoch(model, data_loader, device, scaler):
 
     metric_logger.wandb("valid")
 
-    return metric_logger
+    return loss_value
 
 
 #https://pseudo-lab.github.io/Tutorial-Book-en/chapters/en/object-detection/Ch4-RetinaNet.html
