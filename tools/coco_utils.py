@@ -6,6 +6,7 @@ import torch.utils.data
 import torchvision
 from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
+from PIL import Image
 
 from . import transforms as T
 
@@ -29,24 +30,7 @@ class FilterAndRemapCocoCategories:
         return image, target
 
 
-def convert_coco_poly_to_mask(segmentations, height, width):
-    masks = []
-    for polygons in segmentations:
-        rles = coco_mask.frPyObjects(polygons, height, width)
-        mask = coco_mask.decode(rles)
-        if len(mask.shape) < 3:
-            mask = mask[..., None]
-        mask = torch.as_tensor(mask, dtype=torch.uint8)
-        mask = mask.any(dim=2)
-        masks.append(mask)
-    if masks:
-        masks = torch.stack(masks, dim=0)
-    else:
-        masks = torch.zeros((0, height, width), dtype=torch.uint8)
-    return masks
-
-
-class ConvertCocoPolysToMask:
+class ConvertCocoPolysToBBOX:
     def __call__(self, image, target):
         w, h = image.size
 
@@ -67,26 +51,10 @@ class ConvertCocoPolysToMask:
         classes = [obj["category_id"] for obj in anno]
         classes = torch.tensor(classes, dtype=torch.int64)
 
-        keypoints = None
-        if anno and "keypoints" in anno[0]:
-            keypoints = [obj["keypoints"] for obj in anno]
-            keypoints = torch.as_tensor(keypoints, dtype=torch.float32)
-            num_keypoints = keypoints.shape[0]
-            if num_keypoints:
-                keypoints = keypoints.view(num_keypoints, -1, 3)
-
-        keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
-        boxes = boxes[keep]
-        classes = classes[keep]
-        if keypoints is not None:
-            keypoints = keypoints[keep]
-
         target = {}
         target["boxes"] = boxes
         target["labels"] = classes
         target["image_id"] = image_id
-        if keypoints is not None:
-            target["keypoints"] = keypoints
 
         # for conversion to coco api
         area = torch.tensor([obj["area"] for obj in anno])
@@ -101,27 +69,13 @@ def _coco_remove_images_without_annotations(dataset, cat_list=None):
     def _has_only_empty_bbox(anno):
         return all(any(o <= 1 for o in obj["bbox"][2:]) for obj in anno)
 
-    def _count_visible_keypoints(anno):
-        return sum(sum(1 for v in ann["keypoints"][2::3] if v > 0) for ann in anno)
-
-    min_keypoints_per_image = 10
-
     def _has_valid_annotation(anno):
         # if it's empty, there is no annotation
-        if len(anno) == 0:
-            return False
         # if all boxes have close to zero area, there is no annotation
-        if _has_only_empty_bbox(anno):
+        if len(anno) == 0 or _has_only_empty_bbox(anno):
             return False
-        # keypoints task have a slight different critera for considering
-        # if an annotation is valid
-        if "keypoints" not in anno[0]:
-            return True
-        # for keypoint detection tasks, only consider valid images those
-        # containing at least min_keypoints_per_image
-        if _count_visible_keypoints(anno) >= min_keypoints_per_image:
-            return True
-        return False
+
+        return True
 
     if not isinstance(dataset, torchvision.datasets.CocoDetection):
         raise TypeError(
@@ -162,13 +116,7 @@ def convert_to_coco_api(ds):
         labels = targets["labels"].tolist()
         areas = targets["area"].tolist()
         iscrowd = targets["iscrowd"].tolist()
-        if "masks" in targets:
-            masks = targets["masks"]
-            # make masks Fortran contiguous for coco_mask
-            masks = masks.permute(0, 2, 1).contiguous().permute(0, 2, 1)
-        if "keypoints" in targets:
-            keypoints = targets["keypoints"]
-            keypoints = keypoints.reshape(keypoints.shape[0], -1).tolist()
+
         num_objs = len(bboxes)
         for i in range(num_objs):
             ann = {}
@@ -179,11 +127,7 @@ def convert_to_coco_api(ds):
             ann["area"] = areas[i]
             ann["iscrowd"] = iscrowd[i]
             ann["id"] = ann_id
-            if "masks" in targets:
-                ann["segmentation"] = coco_mask.encode(masks[i].numpy())
-            if "keypoints" in targets:
-                ann["keypoints"] = keypoints[i]
-                ann["num_keypoints"] = sum(k != 0 for k in keypoints[i][2::3])
+
             dataset["annotations"].append(ann)
             ann_id += 1
     dataset["categories"] = [{"id": i} for i in sorted(categories)]
@@ -224,7 +168,7 @@ def get_coco(root, image_set, transforms):
         "val": ("valid", os.path.join("valid", anno_file)),
     }
 
-    t = [ConvertCocoPolysToMask()]
+    t = [ConvertCocoPolysToBBOX()]
 
     if transforms is not None:
         t.append(transforms)
@@ -239,10 +183,4 @@ def get_coco(root, image_set, transforms):
     if image_set == "train":
         dataset = _coco_remove_images_without_annotations(dataset)
 
-    # dataset = torch.utils.data.Subset(dataset, [i for i in range(500)])
-
     return dataset
-
-
-def get_coco_kp(root, image_set, transforms):
-    return get_coco(root, image_set, transforms, mode="person_keypoints")

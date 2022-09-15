@@ -7,3 +7,4 @@ pandas
 sahi
 wandb
 albumentations
+opencv-python

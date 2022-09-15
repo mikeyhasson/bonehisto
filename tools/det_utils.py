@@ -416,21 +416,6 @@ class Matcher:
         matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
 
 
-class SSDMatcher(Matcher):
-    def __init__(self, threshold: float) -> None:
-        super().__init__(threshold, threshold, allow_low_quality_matches=False)
-
-    def __call__(self, match_quality_matrix: Tensor) -> Tensor:
-        matches = super().__call__(match_quality_matrix)
-
-        # For each gt, find the prediction with which it has the highest quality
-        _, highest_quality_pred_foreach_gt = match_quality_matrix.max(dim=1)
-        matches[highest_quality_pred_foreach_gt] = torch.arange(
-            highest_quality_pred_foreach_gt.size(0), dtype=torch.int64, device=highest_quality_pred_foreach_gt.device
-        )
-
-        return matches
-
 
 def overwrite_eps(model: nn.Module, eps: float) -> None:
     """

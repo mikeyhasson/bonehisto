@@ -10,9 +10,6 @@ The default hyperparameters are tuned for training on 8 gpus and 2 images per gp
     --lr 0.02 --batch-size 2 --world-size 8
 If you use different number of gpus, the learning rate should be changed to 0.02/8*$NGPU.
 
-On top of that, for training Faster/Mask R-CNN, the default hyperparameters are
-    --epochs 26 --lr-steps 16 22 --aspect-ratio-group-factor 3
-
 the number of epochs should be adapted so that we have the same number of iterations.
 """
 import datetime
@@ -75,6 +72,12 @@ def get_args_parser(add_help=True):
         type=float,
         help="initial learning rate, 0.02 is the default value for training on 8 gpus and 2 images_per_gpu",
     )
+
+
+    parser.add_argument(
+        "--lr-scheduler", default="reducelronplateau", type=str, help="name of lr scheduler (default: multisteplr)"
+    )
+
     parser.add_argument("--scheduler-factor", default=0.7, type=float, help="for ReduceLROnPlateau")
     parser.add_argument("--scheduler-patience", default=6, type=int, help="for ReduceLROnPlateau")
 
@@ -88,15 +91,7 @@ def get_args_parser(add_help=True):
         help="weight decay (default: 1e-4)",
         dest="weight_decay",
     )
-    parser.add_argument(
-        "--norm-weight-decay",
-        default=None,
-        type=float,
-        help="weight decay for Normalization layers (default: None, same value as --wd)",
-    )
-    parser.add_argument(
-        "--lr-scheduler", default="reducelronplateau", type=str, help="name of lr scheduler (default: multisteplr)"
-    )
+
     parser.add_argument(
         "--lr-step-size", default=8, type=int, help="decrease lr every step-size epochs (multisteplr scheduler only)"
     )
@@ -119,7 +114,6 @@ def get_args_parser(add_help=True):
     parser.add_argument("--resume", default="", type=str, help="path of checkpoint")
     parser.add_argument("--start_epoch", default=0, type=int, help="start epoch")
     parser.add_argument("--aspect-ratio-group-factor", default=3, type=int)
-    parser.add_argument("--rpn-score-thresh", default=None, type=float, help="rpn score threshold for faster-rcnn")
     parser.add_argument(
         "--trainable-backbone-layers", default=5, type=int, help="number of trainable layers of backbone"
     )
@@ -206,11 +200,7 @@ def main(args):
         train_sampler = torch.utils.data.RandomSampler(dataset)
         test_sampler = torch.utils.data.SequentialSampler(dataset_test)
 
-    if args.aspect_ratio_group_factor >= 0:
-        group_ids = create_aspect_ratio_groups(dataset, k=args.aspect_ratio_group_factor)
-        train_batch_sampler = GroupedBatchSampler(train_sampler, group_ids, args.batch_size)
-    else:
-        train_batch_sampler = torch.utils.data.BatchSampler(train_sampler, args.batch_size, drop_last=True)
+    train_batch_sampler = torch.utils.data.BatchSampler(train_sampler, args.batch_size, drop_last=True)
 
     train_collate_fn = utils.collate_fn
 
@@ -224,11 +214,6 @@ def main(args):
 
     print("Creating model")
     kwargs = {"trainable_backbone_layers": args.trainable_backbone_layers}
-    if args.data_augmentation in ["multiscale", "lsj"]:
-        kwargs["_skip_resize"] = True
-    if "rcnn" in args.model:
-        if args.rpn_score_thresh is not None:
-            kwargs["rpn_score_thresh"] = args.rpn_score_thresh
 
     mean, std = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]  # https://github.com/ozanciga/self-supervised-histopathology/issues/2
     model = retinanet_resnet18_fpn_v2(weights=args.weights, weights_backbone=args.weights_backbone,
@@ -243,12 +228,7 @@ def main(args):
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
-    if args.norm_weight_decay is None:
-        parameters = [p for p in model.parameters() if p.requires_grad]
-    else:
-        param_groups = torchvision.ops._utils.split_normalization_params(model)
-        wd_groups = [args.norm_weight_decay, args.weight_decay]
-        parameters = [{"params": p, "weight_decay": w} for p, w in zip(param_groups, wd_groups) if p]
+    parameters = [p for p in model.parameters() if p.requires_grad]
 
     opt_name = args.opt.lower()
     if opt_name.startswith("sgd"):
@@ -267,16 +247,18 @@ def main(args):
     scaler = torch.cuda.amp.GradScaler() if args.amp else None
 
     args.lr_scheduler = args.lr_scheduler.lower()
+
     if args.lr_scheduler == "multisteplr":
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_steps, gamma=args.lr_gamma)
-    elif args.lr_scheduler == "cosineannealinglr":
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    elif args.lr_scheduler == "onecyclelr":
+        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer,steps_per_epoch = args.batch_size,
+                                                           max_lr = args.max_lr, epochs=args.epochs)
     elif args.lr_scheduler == "reducelronplateau":
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=args.scheduler_factor,
                                                                   patience=args.scheduler_patience)
     else:
         raise RuntimeError(
-            f"Invalid lr scheduler '{args.lr_scheduler}'. Only MultiStepLR and CosineAnnealingLR are supported."
+            f"Invalid lr scheduler '{args.lr_scheduler}'. Only MultiStepLR, OneCycleLR and ReduceLROnPlateau are supported."
         )
 
     if args.resume:
