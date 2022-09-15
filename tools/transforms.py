@@ -416,6 +416,16 @@ class FixedSizeCrop(nn.Module):
         return img, target
 
 
+class UnpaddedFixedSizeCrop(FixedSizeCrop):
+    def __init__(self, size, fill=0, padding_mode="constant"):
+        super().__init__()
+        size = tuple(T._setup_size(size, error_msg="Please provide only two dimensions (h, w) for size."))
+        self.crop_height = size[0]
+        self.crop_width = size[1]
+        self.fill = fill  # TODO: Fill is currently respected only on PIL. Apply tensor patch.
+        self.padding_mode = padding_mode
+
+
 class RandomShortestSize(nn.Module):
     def __init__(
             self,

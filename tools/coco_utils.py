@@ -1,14 +1,16 @@
-import numpy as np
 import copy
 import os
+
 import torch
 import torch.utils.data
 import torchvision
-from . import transforms as T
 from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
 
-#https://github.com/pytorch/vision/blob/main/references/detection/coco_utils.py
+from . import transforms as T
+
+
+# https://github.com/pytorch/vision/blob/main/references/detection/coco_utils.py
 class FilterAndRemapCocoCategories:
     def __init__(self, categories, remap=True):
         self.categories = categories
@@ -64,7 +66,6 @@ class ConvertCocoPolysToMask:
 
         classes = [obj["category_id"] for obj in anno]
         classes = torch.tensor(classes, dtype=torch.int64)
-
 
         keypoints = None
         if anno and "keypoints" in anno[0]:

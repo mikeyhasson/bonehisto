@@ -1,25 +1,26 @@
 # source: https://pytorch.org/vision/stable/_modules/torchvision/models/detection/retinanet.html#retinanet_resnet50_fpn
 
-import math
 import warnings
 from collections import OrderedDict
 from functools import partial
 from typing import Any, Callable, Dict, List, Tuple, Optional
+
+import math
 import torch
+import torchvision.models.resnet as resnet
 from torch import nn, Tensor
-from torchvision.ops import sigmoid_focal_loss
-from torchvision.ops import boxes as box_ops
-from torchvision.ops import misc as misc_nn_ops
-from torchvision.ops.feature_pyramid_network import LastLevelP6P7
-import tools.det_utils as det_utils
-from tools.det_utils import box_loss
 from torchvision.models.detection.anchor_utils import AnchorGenerator
 from torchvision.models.detection.backbone_utils import BackboneWithFPN
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models.resnet import ResNet18_Weights, resnet18
-import torchvision.models.resnet as resnet
-
+from torchvision.ops import boxes as box_ops
+from torchvision.ops import misc as misc_nn_ops
+from torchvision.ops import sigmoid_focal_loss
 from torchvision.ops.feature_pyramid_network import ExtraFPNBlock, LastLevelMaxPool
+from torchvision.ops.feature_pyramid_network import LastLevelP6P7
+
+import tools.det_utils as det_utils
+from tools.det_utils import box_loss
 
 __all__ = [
     "RetinaNet",
@@ -36,6 +37,13 @@ def _sum(x: List[Tensor]) -> Tensor:
 
 def _default_anchorgen():
     anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
+    aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
+    anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
+    return anchor_generator
+
+
+def _bonecell_anchorgen():
+    anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [16, 32, 64, 128, 256])
     aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
     anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
     return anchor_generator
@@ -464,7 +472,7 @@ class RetinaNet(nn.Module):
         if self.training:
             return losses
 
-        return detections
+        return losses, detections
 
     def compute_loss(self, targets, head_outputs, anchors):
         # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor]) -> Dict[str, Tensor]
@@ -623,6 +631,7 @@ class RetinaNet(nn.Module):
                 # compute the losses
                 losses = self.compute_loss(targets, head_outputs, anchors)
         else:
+            losses = self.compute_loss(targets, head_outputs, anchors)
             # recover level sizes
             num_anchors_per_level = [x.size(2) * x.size(3) for x in features]
             HW = 0
@@ -647,6 +656,7 @@ class RetinaNet(nn.Module):
                 warnings.warn("RetinaNet always returns a (Losses, Detections) tuple in scripting")
                 self._has_warned = True
             return losses, detections
+
         return self.eager_outputs(losses, detections)
 
 
@@ -756,7 +766,7 @@ def retinanet_resnet18_fpn_v2(
     backbone = resnet_fpn_extractor(
         backbone, trainable_backbone_layers, returned_layers=[2, 3, 4], extra_blocks=LastLevelP6P7(512, 256)
     )
-    anchor_generator = _default_anchorgen()
+    anchor_generator = _bonecell_anchorgen()
     head = RetinaNetHead(
         backbone.out_channels,
         anchor_generator.num_anchors_per_location()[0],

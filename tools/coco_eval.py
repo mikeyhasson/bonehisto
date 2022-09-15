@@ -5,10 +5,12 @@ from contextlib import redirect_stdout
 import numpy as np
 import pycocotools.mask as mask_util
 import torch
-from . import utils
+import wandb
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
-import wandb
+
+from . import utils
+
 
 class CocoEvaluator:
     def __init__(self, coco_gt, iou_types):
@@ -27,9 +29,9 @@ class CocoEvaluator:
 
     def wandb(self):
         summary = self.coco_eval['bbox'].stats
-        wandb.log({'recall':summary[8],
-                   'ap_0.5:0.95':summary[0],
-                   'ap_0.5':summary[1]})
+        wandb.log({'recall': summary[8],
+                   'ap_0.5:0.95': summary[0],
+                   'ap_0.5': summary[1]})
 
     def update(self, predictions):
         img_ids = list(np.unique(list(predictions.keys())))
@@ -60,6 +62,7 @@ class CocoEvaluator:
         for iou_type, coco_eval in self.coco_eval.items():
             print(f"IoU metric: {iou_type}")
             coco_eval.summarize()
+
     def prepare(self, predictions, iou_type):
         if iou_type == "bbox":
             return self.prepare_for_coco_detection(predictions)

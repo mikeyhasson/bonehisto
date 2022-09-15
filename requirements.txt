@@ -6,3 +6,4 @@ pycocotools
 pandas
 sahi
 wandb
+albumentations

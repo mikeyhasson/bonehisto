@@ -18,17 +18,19 @@ the number of epochs should be adapted so that we have the same number of iterat
 import datetime
 import os
 import time
-import wandb
 
-from retinanet import retinanet_resnet18_fpn_v2
-from tools import presets
 import torch
 import torch.utils.data
 import torchvision
 import torchvision.models.detection
+import wandb
+from sahi.model import TorchVisionDetectionModel
+
 import tools.utils as utils
+from retinanet import retinanet_resnet18_fpn_v2
+from tools import presets
 from tools.coco_utils import get_coco
-from tools.engine import evaluate, train_one_epoch,valid_one_epoch
+from tools.engine import train_one_epoch, valid_one_epoch, inference
 from tools.group_by_aspect_ratio import create_aspect_ratio_groups, GroupedBatchSampler
 
 
@@ -39,13 +41,14 @@ def get_dataset(image_set, transform, data_path):
 
 def get_transform(train, args):
     if train:
-        return presets.DetectionPresetTrain(data_augmentation=args.data_augmentation)
+        return presets.DetectionPresetTrain(data_augmentation=args.data_augmentation
+                                            , crop_size=args.crop_size)
     elif args.weights and args.test_only:
         weights = torchvision.models.get_weight(args.weights)
         trans = weights.transforms()
         return lambda img, target: (trans(img), target)
     else:
-        return presets.DetectionPresetEval()
+        return presets.DetectionPresetEval(args.crop_size)
 
 
 def get_args_parser(add_help=True):
@@ -53,7 +56,7 @@ def get_args_parser(add_help=True):
 
     parser = argparse.ArgumentParser(description="PyTorch Detection Training", add_help=add_help)
 
-    parser.add_argument("--data-path", default="/home/paperspace/bonehisto/bonecell", type=str, help="dataset path")
+    parser.add_argument("--data-path", default="/home/paperspace/bonehisto/rfimg", type=str, help="dataset path")
     parser.add_argument("--dataset", default="bonecell", type=str, help="dataset name")
     parser.add_argument("--model", default="retinanet_resnet18_fpn", type=str, help="model name")
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
@@ -64,6 +67,7 @@ def get_args_parser(add_help=True):
     parser.add_argument(
         "-j", "--workers", default=4, type=int, metavar="N", help="number of data loading workers (default: 4)"
     )
+    parser.add_argument("--crop-size", default="512", type=int, help="model name")
     parser.add_argument("--opt", default="adamw", type=str, help="optimizer")
     parser.add_argument(
         "--lr",
@@ -71,6 +75,9 @@ def get_args_parser(add_help=True):
         type=float,
         help="initial learning rate, 0.02 is the default value for training on 8 gpus and 2 images_per_gpu",
     )
+    parser.add_argument("--scheduler-factor", default=0.7, type=float, help="for ReduceLROnPlateau")
+    parser.add_argument("--scheduler-patience", default=6, type=int, help="for ReduceLROnPlateau")
+
     parser.add_argument("--momentum", default=0.9, type=float, metavar="M", help="momentum")
     parser.add_argument(
         "--wd",
@@ -88,7 +95,7 @@ def get_args_parser(add_help=True):
         help="weight decay for Normalization layers (default: None, same value as --wd)",
     )
     parser.add_argument(
-        "--lr-scheduler", default="multisteplr", type=str, help="name of lr scheduler (default: multisteplr)"
+        "--lr-scheduler", default="reducelronplateau", type=str, help="name of lr scheduler (default: multisteplr)"
     )
     parser.add_argument(
         "--lr-step-size", default=8, type=int, help="decrease lr every step-size epochs (multisteplr scheduler only)"
@@ -149,14 +156,25 @@ def get_args_parser(add_help=True):
 
 
 def init_wandb(args):
-    config_dic = {"data_augmentation":args.data_augmentation, "epochs": args.epochs, "lr":args.lr,
-                  "lr_gamma": args.lr_gamma, "lr_scheduler": args.lr_scheduler, "opt":args.opt,
-                  "weight_decay":args.weight_decay, "batch_size":args.batch_size}
+    config_dic = {"data_augmentation": args.data_augmentation, "epochs": args.epochs, "lr0": args.lr,
+                  "lr_gamma": args.lr_gamma, "lr_scheduler": args.lr_scheduler, "opt": args.opt,
+                  "weight_decay": args.weight_decay, "batch_size": args.batch_size}
 
-    wandb.init(project=args.dataset, config=config_dic,name = args.name)
+    wandb.init(project=args.dataset, config=config_dic, name=args.name)
     wandb.define_metric("epoch")
-    for name in ["train/*","valid/*","recall",'ap_0.5:0.95', 'ap_0.5']:
+    for name in ["train/*", "valid/*", "recall", 'ap_0.5:0.95', 'ap_0.5', 'lr']:
         wandb.define_metric(name, step_metric="epoch")
+
+    wandb.log({"lr": args.lr, "epoch": 0})
+
+
+def get_eval_model(model, image_size, device):
+    return TorchVisionDetectionModel(
+        model=model,
+        image_size=image_size,
+        device=device,
+        load_at_init=True,
+    )
 
 
 def main(args):
@@ -212,9 +230,10 @@ def main(args):
         if args.rpn_score_thresh is not None:
             kwargs["rpn_score_thresh"] = args.rpn_score_thresh
 
-    mean, std = utils.batch_mean_and_sd(data_loader,device=device)
+    mean, std = [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]  # https://github.com/ozanciga/self-supervised-histopathology/issues/2
     model = retinanet_resnet18_fpn_v2(weights=args.weights, weights_backbone=args.weights_backbone,
-                                   num_classes=num_classes, image_mean=mean, image_std=std, **kwargs)
+                                      num_classes=num_classes, image_mean=mean, image_std=std,
+                                      min_size=args.crop_size, max_size=args.crop_size, **kwargs)
     model.to(device)
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -241,7 +260,7 @@ def main(args):
             nesterov="nesterov" in opt_name,
         )
     elif opt_name == "adamw":
-        optimizer = torch.optim.AdamW(parameters, betas= (0.9,0.999), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = torch.optim.AdamW(parameters, betas=(0.9, 0.999), lr=args.lr, weight_decay=args.weight_decay)
     else:
         raise RuntimeError(f"Invalid optimizer {args.opt}. Only SGD and AdamW are supported.")
 
@@ -252,6 +271,9 @@ def main(args):
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_steps, gamma=args.lr_gamma)
     elif args.lr_scheduler == "cosineannealinglr":
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    elif args.lr_scheduler == "reducelronplateau":
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=args.scheduler_factor,
+                                                                  patience=args.scheduler_patience)
     else:
         raise RuntimeError(
             f"Invalid lr scheduler '{args.lr_scheduler}'. Only MultiStepLR and CosineAnnealingLR are supported."
@@ -266,9 +288,11 @@ def main(args):
         if args.amp:
             scaler.load_state_dict(checkpoint["scaler"])
 
+    eval_model = get_eval_model(model=model, image_size=args.crop_size, device=args.device)
+
     if args.test_only:
         torch.backends.cudnn.deterministic = True
-        evaluate(model, data_loader_test, device=device)
+        inference(eval_model, data_loader_test)
         return
 
     print("Start training")
@@ -278,7 +302,9 @@ def main(args):
             train_sampler.set_epoch(epoch)
 
         train_one_epoch(model, optimizer, data_loader, device, epoch, args.print_freq, scaler)
-        lr_scheduler.step()
+        loss = valid_one_epoch(model, data_loader, device, scaler)
+        lr_scheduler.step(loss)
+        wandb.log({"lr": lr_scheduler.get_lr(), "epoch": epoch})
 
         if args.output_dir:
             checkpoint = {
@@ -293,10 +319,6 @@ def main(args):
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
 
-        # evaluate after every epoch
-        valid_one_epoch(model, data_loader, device, scaler) #to get val loss
-        evaluate(model, data_loader_test, device=device)
-
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(f"Training time {total_time_str}")
@@ -306,3 +328,12 @@ if __name__ == "__main__":
     args = get_args_parser().parse_args()
     main(args)
 
+'''
+Ratios: [0.316, 0.602, 1.0, 1.661, 3.164]
+Scales: [0.4, 0.46, 0.527, 0.605, 0.695]
+
+Ratios: [0.317, 0.603, 1.0, 1.658, 3.151]
+Scales: [0.4, 0.46, 0.528, 0.607, 0.698]
+
+
+'''

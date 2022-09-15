@@ -1,11 +1,11 @@
-import math
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
+import math
 import torch
-from torch.onnx import operators
 from torch import Tensor, nn
 from torch.nn import functional as F
+from torch.onnx import operators
 from torchvision.ops import FrozenBatchNorm2d, complete_box_iou_loss, distance_box_iou_loss, generalized_box_iou_loss
 
 
@@ -127,7 +127,7 @@ class BoxCoder:
     """
 
     def __init__(
-        self, weights: Tuple[float, float, float, float], bbox_xform_clip: float = math.log(1000.0 / 16)
+            self, weights: Tuple[float, float, float, float], bbox_xform_clip: float = math.log(1000.0 / 16)
     ) -> None:
         """
         Args:
@@ -512,12 +512,12 @@ def topk_min(input: Tensor, orig_kval: int, axis: int) -> int:
 
 
 def box_loss(
-    type: str,
-    box_coder: BoxCoder,
-    anchors_per_image: Tensor,
-    matched_gt_boxes_per_image: Tensor,
-    bbox_regression_per_image: Tensor,
-    cnf: Optional[Dict[str, float]] = None,
+        type: str,
+        box_coder: BoxCoder,
+        anchors_per_image: Tensor,
+        matched_gt_boxes_per_image: Tensor,
+        bbox_regression_per_image: Tensor,
+        cnf: Optional[Dict[str, float]] = None,
 ) -> Tensor:
     torch._assert(type in ["l1", "smooth_l1", "ciou", "diou", "giou"], f"Unsupported loss: {type}")
 
