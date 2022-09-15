@@ -286,7 +286,7 @@ def main(args):
         train_one_epoch(model, optimizer, data_loader, device, epoch, args.print_freq, scaler)
         loss = valid_one_epoch(model, data_loader, device, scaler)
         lr_scheduler.step(loss)
-        wandb.log({"lr": lr_scheduler.get_lr(), "epoch": epoch})
+        wandb.log({"lr": optimizer.param_groups[0]["lr"], "epoch": epoch})
 
         if args.output_dir:
             checkpoint = {
