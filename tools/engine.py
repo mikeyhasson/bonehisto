@@ -113,6 +113,7 @@ def valid_one_epoch(model, data_loader, device, scaler):
     # accumulate predictions from all images
     coco_evaluator.accumulate()
     coco_evaluator.summarize()
+    coco_evaluator.wandb()
 
     return loss_value
 
