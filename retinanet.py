@@ -395,8 +395,8 @@ class RetinaNet(nn.Module):
             backbone,
             num_classes,
             # transform parameters
-            min_size=400,
-            max_size=400,
+            min_size=800,
+            max_size=1333,
             image_mean=None,
             image_std=None,
             # Anchor parameters
