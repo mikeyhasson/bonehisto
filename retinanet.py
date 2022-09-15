@@ -36,7 +36,7 @@ def _sum(x: List[Tensor]) -> Tensor:
 
 def _default_anchorgen():
     anchor_sizes = tuple((x, int(x * 2 ** (1.0 / 3)), int(x * 2 ** (2.0 / 3))) for x in [32, 64, 128, 256, 512])
-    aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
+    aspect_ratios = ((0.3, 0.6, 1.0, 1.7, 3),) * len(anchor_sizes)
     anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
     return anchor_generator
 

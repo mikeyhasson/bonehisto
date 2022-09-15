@@ -308,8 +308,8 @@ def main(args):
         loss = valid_one_epoch(model, data_loader, device, scaler) #to get val loss
         lr_scheduler.step(loss)
         wandb.log({"lr": optimizer.param_groups[0]["lr"], "epoch": epoch})
-
-        evaluate(model, data_loader_test, device=device)
+        if epoch % 4 ==0:
+            evaluate(model, data_loader_test, device=device)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
