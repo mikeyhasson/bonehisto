@@ -3,13 +3,12 @@ import io
 from contextlib import redirect_stdout
 
 import numpy as np
+import pycocotools.mask as mask_util
 import torch
-import wandb
+from . import utils
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
-
-from . import utils
-
+import wandb
 
 class CocoEvaluator:
     def __init__(self, coco_gt, iou_types):
@@ -28,9 +27,9 @@ class CocoEvaluator:
 
     def wandb(self):
         summary = self.coco_eval['bbox'].stats
-        wandb.log({'recall': summary[8],
-                   'ap_0.5:0.95': summary[0],
-                   'ap_0.5': summary[1]})
+        wandb.log({'recall':summary[8],
+                   'ap_0.5:0.95':summary[0],
+                   'ap_0.5':summary[1]})
 
     def update(self, predictions):
         img_ids = list(np.unique(list(predictions.keys())))
@@ -61,10 +60,13 @@ class CocoEvaluator:
         for iou_type, coco_eval in self.coco_eval.items():
             print(f"IoU metric: {iou_type}")
             coco_eval.summarize()
-
     def prepare(self, predictions, iou_type):
         if iou_type == "bbox":
             return self.prepare_for_coco_detection(predictions)
+        if iou_type == "segm":
+            return self.prepare_for_coco_segmentation(predictions)
+        if iou_type == "keypoints":
+            return self.prepare_for_coco_keypoint(predictions)
         raise ValueError(f"Unknown iou type {iou_type}")
 
     def prepare_for_coco_detection(self, predictions):
@@ -87,6 +89,66 @@ class CocoEvaluator:
                         "score": scores[k],
                     }
                     for k, box in enumerate(boxes)
+                ]
+            )
+        return coco_results
+
+    def prepare_for_coco_segmentation(self, predictions):
+        coco_results = []
+        for original_id, prediction in predictions.items():
+            if len(prediction) == 0:
+                continue
+
+            scores = prediction["scores"]
+            labels = prediction["labels"]
+            masks = prediction["masks"]
+
+            masks = masks > 0.5
+
+            scores = prediction["scores"].tolist()
+            labels = prediction["labels"].tolist()
+
+            rles = [
+                mask_util.encode(np.array(mask[0, :, :, np.newaxis], dtype=np.uint8, order="F"))[0] for mask in masks
+            ]
+            for rle in rles:
+                rle["counts"] = rle["counts"].decode("utf-8")
+
+            coco_results.extend(
+                [
+                    {
+                        "image_id": original_id,
+                        "category_id": labels[k],
+                        "segmentation": rle,
+                        "score": scores[k],
+                    }
+                    for k, rle in enumerate(rles)
+                ]
+            )
+        return coco_results
+
+    def prepare_for_coco_keypoint(self, predictions):
+        coco_results = []
+        for original_id, prediction in predictions.items():
+            if len(prediction) == 0:
+                continue
+
+            boxes = prediction["boxes"]
+            boxes = convert_to_xywh(boxes).tolist()
+            scores = prediction["scores"].tolist()
+            labels = prediction["labels"].tolist()
+            keypoints = prediction["keypoints"]
+            keypoints = keypoints.flatten(start_dim=1).tolist()
+
+            coco_results.extend(
+                [
+                    {
+                        "image_id": original_id,
+                        "category_id": labels[k],
+                        "keypoints": keypoint,
+                        "score": scores[k],
+                    }
+                    for k, keypoint in enumerate(keypoints)
                 ]
             )
         return coco_results

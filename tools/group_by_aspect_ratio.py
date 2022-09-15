@@ -1,9 +1,9 @@
 import bisect
 import copy
+import math
 from collections import defaultdict
 from itertools import chain, repeat
 
-import math
 import numpy as np
 import torch
 import torch.utils.data

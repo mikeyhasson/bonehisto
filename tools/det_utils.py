@@ -1,11 +1,11 @@
+import math
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
-import math
 import torch
+from torch.onnx import operators
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch.onnx import operators
 from torchvision.ops import FrozenBatchNorm2d, complete_box_iou_loss, distance_box_iou_loss, generalized_box_iou_loss
 
 
@@ -127,7 +127,7 @@ class BoxCoder:
     """
 
     def __init__(
-            self, weights: Tuple[float, float, float, float], bbox_xform_clip: float = math.log(1000.0 / 16)
+        self, weights: Tuple[float, float, float, float], bbox_xform_clip: float = math.log(1000.0 / 16)
     ) -> None:
         """
         Args:
@@ -416,6 +416,21 @@ class Matcher:
         matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
 
 
+class SSDMatcher(Matcher):
+    def __init__(self, threshold: float) -> None:
+        super().__init__(threshold, threshold, allow_low_quality_matches=False)
+
+    def __call__(self, match_quality_matrix: Tensor) -> Tensor:
+        matches = super().__call__(match_quality_matrix)
+
+        # For each gt, find the prediction with which it has the highest quality
+        _, highest_quality_pred_foreach_gt = match_quality_matrix.max(dim=1)
+        matches[highest_quality_pred_foreach_gt] = torch.arange(
+            highest_quality_pred_foreach_gt.size(0), dtype=torch.int64, device=highest_quality_pred_foreach_gt.device
+        )
+
+        return matches
+
 
 def overwrite_eps(model: nn.Module, eps: float) -> None:
     """
@@ -497,12 +512,12 @@ def topk_min(input: Tensor, orig_kval: int, axis: int) -> int:
 
 
 def box_loss(
-        type: str,
-        box_coder: BoxCoder,
-        anchors_per_image: Tensor,
-        matched_gt_boxes_per_image: Tensor,
-        bbox_regression_per_image: Tensor,
-        cnf: Optional[Dict[str, float]] = None,
+    type: str,
+    box_coder: BoxCoder,
+    anchors_per_image: Tensor,
+    matched_gt_boxes_per_image: Tensor,
+    bbox_regression_per_image: Tensor,
+    cnf: Optional[Dict[str, float]] = None,
 ) -> Tensor:
     torch._assert(type in ["l1", "smooth_l1", "ciou", "diou", "giou"], f"Unsupported loss: {type}")
 
