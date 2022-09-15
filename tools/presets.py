@@ -34,7 +34,7 @@ class DetectionPresetEval:
     def __init__(self, crop_size):
         self.transforms = T.Compose(
             [
-                T.RandomCrop(width=crop_size, height=crop_size),
+                T.FixedSizeCrop((crop_size,crop_size)),
                 T.PILToTensor(),
                 T.ConvertImageDtype(torch.float),
             ]
